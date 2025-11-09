@@ -1,4 +1,5 @@
 import os
+import random
 import webbrowser
 import customtkinter as ctk
 from typing import Callable, Tuple
@@ -307,6 +308,14 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     )
     show_mouth_mask_box_switch.place(relx=0.6, rely=0.45)
 
+    auto_detect_button = ctk.CTkButton(
+        root,
+        text=_("Auto detected and Start all"),
+        cursor="hand2",
+        command=lambda: auto_detect_and_start_all(start),
+    )
+    auto_detect_button.place(relx=0.15, rely=0.74, relwidth=0.5, relheight=0.05)
+
     start_button = ctk.CTkButton(
         root, text=_("Start"), cursor="hand2", command=lambda: analyze_target(start, root)
     )
@@ -480,6 +489,83 @@ def analyze_target(start: Callable[[], None], root: ctk.CTk):
             update_status("No faces found in target")
     else:
         select_output_path(start)
+
+
+def auto_detect_and_start_all(start: Callable[[], None]) -> None:
+    if modules.globals.map_faces:
+        update_status("Disable face mapping to use auto detection.")
+        return
+
+    if not modules.globals.source_path or not is_image(modules.globals.source_path):
+        update_status("Please select a valid source image before starting auto detection.")
+        return
+
+    autodetect_dir = resolve_relative_path("../autodetect")
+    if not os.path.isdir(autodetect_dir):
+        autodetect_dir = "/autodetect"
+
+    if not os.path.isdir(autodetect_dir):
+        update_status("The /autodetect folder was not found.")
+        return
+
+    media_paths = []
+    for entry in sorted(os.listdir(autodetect_dir)):
+        full_path = os.path.join(autodetect_dir, entry)
+        if is_image(full_path) or is_video(full_path):
+            media_paths.append(full_path)
+
+    if not media_paths:
+        update_status("No images or videos found in the /autodetect folder.")
+        return
+
+    output_dir = resolve_relative_path("../autodetectedsaved")
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except OSError:
+        output_dir = "/autodetectedsaved"
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError:
+            update_status("Unable to create the /autodetectedsaved folder.")
+            return
+
+    global RECENT_DIRECTORY_TARGET, RECENT_DIRECTORY_OUTPUT
+    RECENT_DIRECTORY_TARGET = autodetect_dir
+    RECENT_DIRECTORY_OUTPUT = output_dir
+
+    processed_count = 0
+    failed_items: list[str] = []
+
+    for media_path in media_paths:
+        modules.globals.target_path = media_path
+        modules.globals.output_path = _generate_unique_output_path(media_path, output_dir)
+        update_status(f"Processing {os.path.basename(media_path)}...")
+        try:
+            start()
+        except Exception as error:
+            update_status(
+                f"Failed processing {os.path.basename(media_path)}: {error}"
+            )
+            failed_items.append(os.path.basename(media_path))
+            continue
+        processed_count += 1
+
+    if failed_items:
+        update_status(
+            "Auto detection completed: "
+            + f"{processed_count}/{len(media_paths)} succeeded, {len(failed_items)} failed."
+        )
+    else:
+        update_status("Auto detection completed.")
+
+
+def _generate_unique_output_path(target_path: str, output_dir: str) -> str:
+    extension = os.path.splitext(target_path)[1]
+    while True:
+        random_name = str(random.randint(1, 9999999))
+        candidate = os.path.join(output_dir, f"{random_name}{extension}")
+        if not os.path.exists(candidate):
+            return candidate
 
 
 def create_source_target_popup(
